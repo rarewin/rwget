@@ -1,8 +1,32 @@
 use hyper::rt::{self, Future, Stream};
-use hyper::{Client, Uri};
+use hyper::{Client, StatusCode, Uri};
 
 use clap::{App, Arg};
-// use std::fs::File;
+use std::fs::File;
+use std::io::prelude::*;
+
+fn fetch_uri(uri: Uri, mut file: File) -> impl Future<Item = (), Error = ()> {
+    // クライアントを作成
+    let client = Client::new();
+
+    // クライアントのFutureを作成
+    client
+        .get(uri)
+        .and_then(move |res| {
+            if res.status() != StatusCode::OK {
+                panic!("{}", res.status());
+            }
+
+            res.into_body()
+                .for_each(move |chunk| file.write_all(&chunk).map_err(|e| panic!("{}", e)))
+        })
+        .map(|_| {
+            println!("done");
+        })
+        .map_err(|err| {
+            println!("Error: {}", err);
+        })
+}
 
 fn main() {
     // オプション処理
@@ -33,33 +57,16 @@ fn main() {
             uri.path()
         })
         .to_string();
-    println!("{}", outfile);
 
-    // クライアントを作成
-    let client = Client::new();
+    let file = match File::create(&outfile) {
+        Err(_) => {
+            panic!("couldn't open {}", outfile);
+        }
+        Ok(file) => file,
+    };
 
-    // クライアントのFutureを作成
-    let fut = client
-        .get(uri)
-        .and_then(|res| {
-            println!("Response: {}", res.status());
-            println!("Headers: {:#?}", res.headers());
-            // bodyのstreamを繋げて新しいFutureをつくる
-            res.into_body().concat2()
-        })
-        .and_then(|_body| {
-            // match File::create(&outfile) {
-            //     Err(_) => {}
-            //     Ok(_) => {}
-            // }
-            Ok(())
-        })
-        .map(|_| {
-            println!("\n\nDone.");
-        })
-        .map_err(|err| {
-            println!("Error: {}", err);
-        });
+    let fut = fetch_uri(uri, file);
 
+    // ランタイムで実行
     rt::run(fut);
 }
